@@ -4,7 +4,7 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
-## [未发布]
+## [0.1.1] - 2026-09-08
 
 ### 优化
 
@@ -15,6 +15,7 @@
 ### 修复
 
 - 为 `build_portable.ps1` 增加 UTF-8 BOM，修复 Windows PowerShell 5.1 解析中文字符串时的语法错误。
+- 构建阶段改用复制方式组装发布目录，避免 Windows 临时占用导致目录移动失败。
 
 ## [0.1.0] - 2026-09-08（新仓库首发）
 

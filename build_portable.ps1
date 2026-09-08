@@ -158,7 +158,7 @@ if (Test-Path -LiteralPath $finalPackage) {
 if (Test-Path -LiteralPath $finalZip) {
     Remove-Item -LiteralPath $finalZip -Force
 }
-Move-Item -LiteralPath $packageDir -Destination $finalPackage
+Copy-Item -LiteralPath $packageDir -Destination $finalPackage -Recurse -Force
 Compress-Archive -LiteralPath $finalPackage -DestinationPath $finalZip -CompressionLevel Optimal
 
 Write-Host "构建完成："

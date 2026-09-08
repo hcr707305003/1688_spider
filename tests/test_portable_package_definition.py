@@ -28,6 +28,10 @@ class PortablePackageDefinitionTests(unittest.TestCase):
         self.assertIn('browser\\chromedriver.exe', script)
         self.assertIn('data\\browser_data', script)
         self.assertIn('data\\products', script)
+        self.assertIn(
+            'Copy-Item -LiteralPath $packageDir -Destination $finalPackage -Recurse -Force',
+            script,
+        )
         self.assertIn('Compress-Archive', script)
 
 

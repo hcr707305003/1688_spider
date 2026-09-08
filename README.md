@@ -1,6 +1,6 @@
 # 1688详情页资源采集工具
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.1.1-blue)
 ![Python](https://img.shields.io/badge/python-3.11+-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 ![Platform](https://img.shields.io/badge/portable-Windows%20x64-lightgrey)
@@ -11,7 +11,7 @@
 
 ## 版本信息 
 
-- 当前版本：0.1.0（新仓库首发）
+- 当前版本：0.1.1
 - 当前维护：hcr707305003
 - 原项目作者：急云
 - 项目地址：https://github.com/hcr707305003/1688_spider
@@ -35,7 +35,7 @@
 
 ## 快速开始（推荐）
 
-从 [Releases](https://github.com/hcr707305003/1688_spider/releases) 下载 `1688_spider-v0.1.0-windows-x64.zip`，完整解压后双击 `1688商品采集工具.exe`。便携版已经包含 Python 运行时、浏览器、匹配驱动和 aria2，不需要运行安装程序。
+从 [Releases](https://github.com/hcr707305003/1688_spider/releases) 下载 `1688_spider-v0.1.1-windows-x64.zip`，完整解压后双击 `1688商品采集工具.exe`。便携版已经包含 Python 运行时、浏览器、匹配驱动和 aria2，不需要运行安装程序。
 
 粘贴 1688 商品详情链接并点击“开始采集”。商品 HTML、图片、视频和 `product.json` 会保存到 `data/products/`。
 
@@ -127,7 +127,7 @@ pip install moviepy
 
 ### 免安装便携版
 
-Windows 64 位发布文件名为 `1688_spider-v0.1.0-windows-x64.zip`。解压后的结构如下：
+Windows 64 位发布文件名为 `1688_spider-v0.1.1-windows-x64.zip`。解压后的结构如下：
 
 ```text
 1688商品采集工具便携版/
@@ -169,7 +169,7 @@ powershell -ExecutionPolicy Bypass -File .\build_portable.ps1
 
 ```powershell
 dist\1688商品采集工具便携版\
-dist\1688_spider-v0.1.0-windows-x64.zip
+dist\1688_spider-v0.1.1-windows-x64.zip
 ```
 
 不要只分发主 EXE；`browser/`、`runtime/`、`tools/` 必须与 EXE 保持原目录结构。
