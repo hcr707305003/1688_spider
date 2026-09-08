@@ -1,0 +1,647 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+1688详情页资源采集工具
+
+功能：
+1. 解析本地1688详情页HTML文件
+2. 提取商品头图、详情图、视频和属性信息
+3. 批量下载资源文件
+4. 自动分类保存文件
+5. 生成URL快捷方式和重建脚本
+"""
+
+import os
+import sys
+import io
+
+sys.dont_write_bytecode = True
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+from utils.tool_downloader import ensure_all_dependencies
+ensure_all_dependencies(tool_names=('aria2c',))
+
+from utils.version import __version__
+from utils.parser import HTMLParser
+from utils.tool_downloader import Downloader, get_aria2c_path
+from utils.file_handler import FileHandler
+from utils.logger import log_info, log_success, log_warning, log_error
+import config
+
+class AlibabaScraper:
+    def __init__(self, html_file, output_path=None, keep_avif=False, webp_support=False, data_only=False, resources_only=False):
+        self.html_file = html_file
+        self.output_path = output_path
+        self.keep_avif = keep_avif
+        self.webp_support = webp_support
+        self.data_only = data_only
+        self.resources_only = resources_only
+        self.product_id = self._extract_product_id()
+        self.parser = None
+        self.downloader = Downloader({
+            'DOWNLOAD_CONF': config.DOWNLOAD_CONF,
+            'FILE_NAMING': config.FILE_NAMING
+        }, keep_avif=self.keep_avif, webp_support=self.webp_support)
+        self.file_handler = FileHandler({
+            'DOWNLOAD_CONF': config.DOWNLOAD_CONF,
+            'FILE_NAMING': config.FILE_NAMING
+        })
+    
+    def _extract_product_id(self):
+        """从HTML文件名中提取商品ID"""
+        base_name = os.path.basename(self.html_file)
+        product_id = os.path.splitext(base_name)[0]
+        return product_id
+    
+    def load_html(self):
+        """加载HTML文件"""
+        try:
+            with open(self.html_file, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            self.parser = HTMLParser(html_content, keep_avif=self.keep_avif, webp_support=self.webp_support)
+            return True
+        except Exception as e:
+            log_error(f"HTML文件加载失败: {e}", "Main")
+            return False
+    
+    def extract_resources(self):
+        """提取资源"""
+        if not self.parser:
+            log_warning("请先加载HTML文件", "Main")
+            return False
+        
+        main_images = self.parser.get_main_images()
+        
+        color_options = self.parser.get_color_options()
+        
+        color_card_images = []
+        for color_name, color_image in color_options:
+            if color_image:
+                color_card_images.append((color_image, color_name))
+        
+        detail_images = self.parser.get_detail_images()
+        
+        videos = self.parser.get_videos()
+        
+        attributes = self.parser.get_attributes()
+        
+        main_images_with_names = []
+        if main_images:
+            for idx, img in enumerate(main_images):
+                main_images_with_names.append((img, f"{idx+1}"))
+        
+        self.resources = {
+            'main_images': main_images_with_names,
+            'detail_images': detail_images,
+            'color_card_images': color_card_images,
+            'videos': videos,
+            'attributes': attributes
+        }
+        
+        parts = []
+        if len(main_images) > 0:
+            parts.append(f"主图({len(main_images)})")
+        if len(videos) > 0:
+            parts.append(f"视频({len(videos)})")
+        if len(color_card_images) > 0:
+            parts.append(f"色卡图({len(color_card_images)})")
+        if len(detail_images) > 0:
+            parts.append(f"详情图({len(detail_images)})")
+        
+        if parts:
+            log_info(f"资源提取完成: {', '.join(parts)}", "Main")
+        else:
+            log_info("资源提取完成: 未发现有效资源", "Main")
+        
+        from utils.shared_cache import save_resources_temp
+        save_resources_temp(
+            self.product_id,
+            self.resources.get('main_images', []),
+            self.resources.get('color_card_images', []),
+            self.resources.get('detail_images', []),
+            self.resources.get('videos', [])
+        )
+        
+        return True
+    
+    def extract_product_info(self):
+        """提取商品详细信息"""
+        if not self.parser:
+            log_warning("请先加载HTML文件", "Main")
+            return False
+        
+        from utils.shared_cache import save_product_info_temp, save_shop_info_temp
+        
+        info = {
+            'title': self.parser.get_title(),
+            'description': self.parser.get_description(),
+            'product_url': self.parser.get_product_url(),
+            'product_code': self.parser.get_product_code(),
+            'shop_info': self.parser.get_shop_info(),
+            'ship_from': self.parser.get_ship_from(),
+            'sales_count': self.parser.get_sales_count(),
+            'min_order': self.parser.get_min_order(),
+            'platform': self.parser.get_platform()
+        }
+        
+        save_product_info_temp(self.product_id, info)
+        
+        if info.get('shop_info'):
+            save_shop_info_temp(info['shop_info'])
+        
+        if info.get('title'):
+            log_info(f"商品标题: {info['title'][:50]}...", "Main")
+        
+        return True
+    
+    def extract_prices(self):
+        """提取价格信息"""
+        if not self.parser:
+            log_warning("请先加载HTML文件", "Main")
+            return False
+        
+        from utils.price_extractor import PriceExtractor
+        
+        with open(self.html_file, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        extractor = PriceExtractor(html_content)
+        prices = extractor.extract_all_prices()
+        
+        self.prices = prices
+        
+        from utils.shared_cache import save_prices_temp
+        save_prices_temp(self.product_id, prices)
+        
+        return True
+    
+    def download_resources(self):
+        """下载资源 - 直接从内存中的资源列表下载"""
+        if not hasattr(self, 'resources'):
+            log_warning("请先提取资源", "Main")
+            return False
+        
+        from config import FILE_NAMING
+        import subprocess
+        
+        # 构建下载列表
+        download_list = []
+        
+        for idx, (url, name) in enumerate(self.resources.get('main_images', [])):
+            filename = f"{FILE_NAMING['main_image_prefix']}{name}.jpg"
+            download_list.append((url, filename))
+        
+        for idx, (url, name) in enumerate(self.resources.get('color_card_images', [])):
+            filename = f"{FILE_NAMING['color_option_prefix']}{name}.jpg"
+            download_list.append((url, filename))
+        
+        for idx, url in enumerate(self.resources.get('detail_images', [])):
+            filename = f"{FILE_NAMING['detail_image_prefix']}{idx+1}.jpg"
+            download_list.append((url, filename))
+        
+        for idx, url in enumerate(self.resources.get('videos', [])):
+            filename = f"{FILE_NAMING['video_prefix']}{idx+1}.mp4"
+            download_list.append((url, filename))
+        
+        if not download_list:
+            log_warning("没有可下载的资源", "Main")
+            return False
+        
+        aria2c_path = get_aria2c_path()
+        if not aria2c_path:
+            log_error("aria2c未找到", "Main")
+            return False
+        
+        output_dir = os.getcwd()
+        
+        # 写入临时下载列表文件
+        list_file = os.path.join(output_dir, '.download_list.txt')
+        with open(list_file, 'w', encoding='utf-8') as f:
+            for url, filename in download_list:
+                f.write(f"{url}\n")
+                f.write(f"  out={filename}\n")
+        
+        cmd = [
+            aria2c_path,
+            '--console-log-level=warn',
+            '-d', output_dir,
+            '-x', '16',
+            '-s', '16',
+            '-k', '1M',
+            '--max-tries=3',
+            '--retry-wait=2',
+            '--timeout=60',
+            '--continue=true',
+            '--auto-file-renaming=false',
+            '-i', list_file
+        ]
+        
+        startupinfo = None
+        creationflags = 0
+        if sys.platform == 'win32':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            creationflags = subprocess.CREATE_NO_WINDOW
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                timeout=600,
+                startupinfo=startupinfo,
+                creationflags=creationflags
+            )
+            
+            # 删除临时下载列表文件
+            if os.path.exists(list_file):
+                os.remove(list_file)
+            
+            if result.returncode == 0:
+                log_info(f"下载完成: {len(download_list)} 个文件", "Main")
+                self._clean_small_files()
+                return True
+            else:
+                log_error(f"aria2c返回码: {result.returncode}", "Main")
+                log_error(f"aria2c stderr: {result.stderr}", "Main")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            log_error("aria2c下载超时", "Main")
+            return False
+        except Exception as e:
+            log_error(f"下载失败: {e}", "Main")
+            return False
+    
+    def _clean_small_files(self, min_size: int = 1024):
+        """清理小文件"""
+        cleaned = 0
+        for f in os.listdir(os.getcwd()):
+            filepath = os.path.join(os.getcwd(), f)
+            if os.path.isfile(filepath) and os.path.getsize(filepath) < min_size:
+                if f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.webp')):
+                    os.remove(filepath)
+                    cleaned += 1
+        if cleaned > 0:
+            log_info(f"清理了 {cleaned} 个小文件", "Main")
+    
+    def save_attributes(self):
+        """保存属性"""
+        if not hasattr(self, 'resources'):
+            log_warning("请先提取资源", "Main")
+            return False
+        
+        attributes = self.resources.get('attributes', [])
+        if attributes:
+            self.file_handler.save_attributes(attributes)
+        
+        return True
+    
+    def generate_shortcut(self):
+        """生成URL快捷方式"""
+        platform = self.parser.get_platform() if self.parser else 'alibaba'
+        self.file_handler.generate_url_shortcut(self.product_id, platform=platform)
+        return True
+    
+    def create_rebuild_script(self):
+        """创建重建脚本"""
+        # 在当前工作目录创建重建脚本
+        self.file_handler.create_rebuild_script('.')
+        return True
+    
+    def organize_files(self):
+        """整理文件"""
+        self.file_handler.move_files_to_directories()
+        return True
+    
+    def run(self, create_rebuild_script=True):
+        """运行完整流程
+        
+        Args:
+            create_rebuild_script: 是否创建重建脚本
+            
+        采集模式:
+            - data_only=True: 只采集数据（标题、价格等）
+            - resources_only=True: 只采集资源链接
+            - 两者都为False: 同时采集数据和资源
+        """
+        log_info("=== 1688详情页资源采集工具 ====", "Main")
+        
+        html_abs_path = os.path.abspath(self.html_file)
+        
+        if not os.path.exists(html_abs_path):
+            log_error(f"HTML文件不存在: {html_abs_path}", "Main")
+            return False
+        
+        self.html_file = html_abs_path
+        
+        if self.output_path:
+            output_dir = os.path.abspath(os.path.join(self.output_path, self.product_id))
+        else:
+            html_dir = os.path.dirname(html_abs_path)
+            output_dir = os.path.abspath(os.path.join(html_dir, self.product_id))
+        
+        if not os.path.exists(output_dir):
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+            except PermissionError as e:
+                log_error(f"无法创建文件夹 '{output_dir}'", "Main")
+                log_error(f"请检查是否有写入权限", "Main")
+                log_error(f"详细错误: {e}", "Main")
+                return False
+        elif os.path.isfile(output_dir):
+            log_error(f"'{output_dir}' 是一个文件而非目录", "Main")
+            log_error(f"请删除或重命名该文件后重试", "Main")
+            return False
+        
+        try:
+            os.chdir(output_dir)
+        except PermissionError as e:
+            log_error(f"无法进入目录 '{output_dir}'", "Main")
+            log_error(f"详细错误: {e}", "Main")
+            return False
+        
+        if not self.load_html():
+            log_error("加载HTML文件失败", "Main")
+            return False
+        
+        # 根据采集模式执行不同操作
+        if self.data_only:
+            # 只采集数据
+            log_info("模式: 只采集数据", "Main")
+            self.extract_product_info()
+            self.extract_prices()
+            log_success("数据采集完成", "Main")
+            return True
+        
+        if self.resources_only:
+            # 只采集资源
+            log_info("模式: 只采集资源", "Main")
+            if not self.extract_resources():
+                log_error("提取资源失败", "Main")
+                return False
+            self.download_resources()
+            log_success("资源采集完成", "Main")
+            return True
+        
+        # 完整采集流程
+        # 2. 提取商品详细信息
+        self.extract_product_info()
+        
+        # 3. 提取价格信息
+        self.extract_prices()
+        
+        # 4. 提取资源
+        if not self.extract_resources():
+            log_error("提取资源失败", "Main")
+            return False
+        
+        # 5. 下载资源
+        self.download_resources()
+        
+        # 6. 保存属性
+        self.save_attributes()
+        
+        # 7. 生成URL快捷方式
+        self.generate_shortcut()
+        
+        # 8. 创建脚本（仅在批处理模式下）
+        if create_rebuild_script:
+            self.create_rebuild_script()
+            self.create_recutpic_script()
+        
+        from utils.shared_cache import save_resource_counts_temp
+        main_count = len(self.resources.get('main_images', []))
+        color_count = len(self.resources.get('color_card_images', []))
+        detail_count = len(self.resources.get('detail_images', []))
+        video_count = len(self.resources.get('videos', []))
+        platform = self.parser.get_platform() if self.parser else 'alibaba'
+        save_resource_counts_temp(self.product_id, main_count, color_count, detail_count, video_count, output_dir, platform)
+        
+        log_success("=== 处理完成 ====", "Main")
+        return True
+    
+    def process_images(self, image_path=None, with_animated=False, output_webp=False, convert_main=False, convert_color=False):
+        """处理图片"""
+        import utils.image_processor
+        
+        utils.image_processor.WITH_ANIMATED = with_animated
+        utils.image_processor.OUTPUT_WEBP = output_webp
+        utils.image_processor.CONVERT_MAIN = convert_main
+        utils.image_processor.CONVERT_COLOR = convert_color
+        
+        if image_path:
+            utils.image_processor.process_single_image(image_path)
+        else:
+            utils.image_processor.enlarge_main_images()
+            utils.image_processor.process_regular_detail_images()
+            utils.image_processor.enlarge_color_card_images()
+            utils.image_processor.reporter.show_final_summary()
+        
+        return True
+    
+    def create_recutpic_script(self):
+        """创建图片处理脚本"""
+        # 在当前工作目录创建图片处理脚本
+        self.file_handler.create_recutpic_script('.')
+        return True
+
+def main():
+    """主函数"""
+    # 连接共享内存（子进程调用）
+    try:
+        from utils.shared_cache import connect_shared_cache, HAS_SHARED_MEMORY
+        if HAS_SHARED_MEMORY:
+            connect_shared_cache()
+    except Exception as e:
+        print(f"连接共享内存失败: {e}")
+    
+    # 解析命令行参数
+    create_rebuild_script = True  # 默认创建重建脚本
+    html_file = None
+    process_images_flag = False
+    image_path = None
+    with_animated = False
+    output_webp = False
+    convert_main = False
+    convert_color = False
+    output_path = None  # 新增：输出路径参数
+    keep_avif = False  # 新增：保留AVIF格式参数
+    webp_support = False  # 新增：WebP格式支持参数
+    data_only = False  # 新增：只采集数据
+    resources_only = False  # 新增：只采集资源
+    
+    # 检查帮助参数
+    if len(sys.argv) > 1 and (sys.argv[1] == "--help" or sys.argv[1] == "-h"):
+        print("====================================")
+        print("1688详情页资源采集工具")
+        print("====================================")
+        print("版本:", __version__)
+        print("作者: 急云")
+        print("描述: 用于采集1688详情页资源的工具，支持图片、视频和属性的提取与下载")
+        print("====================================")
+        print("用法:")
+        print("  python main.py <html_file> [--no-rebuild] [--output <path>]")
+        print("  python main.py --process-images [--webp [--t] [--color]] [--with-animated]")
+        print("  python main.py <image_file> (处理单张图片)")
+        print("  python main.py --gui (启动GUI模式)")
+        print("  python main.py --help | -h (显示此帮助信息)")
+        print("====================================")
+        print("参数说明:")
+        print("  <html_file>          : 要处理的1688详情页HTML文件路径")
+        print("  --no-rebuild         : 可选参数，不创建重建脚本")
+        print("  --output <path>      : 可选参数，指定输出目录路径")
+        print("  --keep-avif          : 可选参数，保留AVIF格式（京东平台专用）")
+        print("  --process-images     : 处理当前目录中的所有详情图")
+        print("    --webp             : 输出图片格式为WebP")
+        print("      --t              : 将主图转换为WebP格式")
+        print("      --color          : 将色卡图转换为WebP格式")
+        print("    --with-animated    : 包含GIF、WebP等动图")
+        print("  <image_file>         : 要处理的单张图片文件路径")
+        print("  --gui                : 启动图形用户界面模式")
+        print("  --help, -h           : 显示此帮助信息")
+        return 0
+    
+    # 检测启动方式，自动判断GUI/CLI模式
+    from utils.launcher import should_start_gui
+    
+    if should_start_gui():
+        from gui.app import main as gui_main
+        gui_main()
+        return 0
+    
+    # 检查--process-images参数是否存在
+    has_process_images = False
+    if len(sys.argv) > 1 and sys.argv[1] == "--process-images":
+        has_process_images = True
+    
+    # 如果没有--process-images参数，过滤掉所有子参数
+    filtered_args = [sys.argv[0]]
+    if has_process_images:
+        filtered_args = sys.argv
+    else:
+        # 只保留非子参数，忽略所有--process-images的子参数
+        i = 1
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            # 检查是否是--process-images的子参数
+            if arg in ["--webp", "--t", "--color", "--with-animated"]:
+                i += 1
+                continue  # 忽略子参数
+            # 保留--no-rebuild参数
+            if arg == "--no-rebuild":
+                filtered_args.append(arg)
+                i += 1
+                continue
+            # 保留--keep-avif参数
+            if arg == "--keep-avif":
+                filtered_args.append(arg)
+                i += 1
+                continue
+            # 保留--output参数及其值
+            if arg == "--output" and i + 1 < len(sys.argv):
+                filtered_args.append(arg)
+                filtered_args.append(sys.argv[i + 1])
+                i += 2
+                continue
+            # 只保留第一个非子参数（HTML文件路径或图片文件路径）
+            if len(filtered_args) == 1:
+                filtered_args.append(arg)
+            i += 1
+    
+    # 重新解析参数
+    sys.argv = filtered_args
+    
+    if len(sys.argv) < 2:
+        print("用法: python main.py <html_file> [--no-rebuild]")
+        print("或: python main.py --process-images [--webp [--t] [--color]] [--with-animated]")
+        print("或: python main.py <image_file> (处理单张图片)")
+        print("或: python main.py --gui (启动GUI模式)")
+        print("或: python main.py --help | -h (显示帮助信息)")
+        return 1
+    else:
+        if sys.argv[1] == "--process-images":
+            process_images_flag = True
+            # 检查子参数
+            webp_found = False
+            for arg in sys.argv[2:]:
+                if arg == "--with-animated":
+                    with_animated = True
+                elif arg == "--webp":
+                    output_webp = True
+                    webp_found = True
+                elif arg == "--t" and webp_found:
+                    convert_main = True
+                elif arg == "--color" and webp_found:
+                    convert_color = True
+        else:
+            # 检查是否是图片文件
+            file_path = sys.argv[1]
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                # 检查文件扩展名是否为图片
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ['.jpg', '.jpeg', '.png']:
+                    # 是图片文件，处理单张图片
+                    image_path = file_path
+                else:
+                    # 不是图片文件，当作HTML文件处理
+                    html_file = file_path
+            else:
+                # 路径不存在，当作HTML文件处理
+                html_file = file_path
+            
+            # 解析其他参数
+            args = sys.argv[2:]
+            i = 0
+            while i < len(args):
+                if args[i] == "--no-rebuild":
+                    create_rebuild_script = False
+                    i += 1
+                elif args[i] == "--keep-avif":
+                    keep_avif = True
+                    i += 1
+                elif args[i] == "--webp-support":
+                    webp_support = True
+                    i += 1
+                elif args[i] == "--data-only":
+                    data_only = True
+                    i += 1
+                elif args[i] == "--resources-only":
+                    resources_only = True
+                    i += 1
+                elif args[i] == "--output" and i + 1 < len(args):
+                    output_path = args[i + 1]
+                    i += 2
+                else:
+                    i += 1
+    
+    if process_images_flag:
+        # 处理图片
+        # 创建一个临时的 AlibabaScraper 实例
+        scraper = AlibabaScraper("")
+        success = scraper.process_images(with_animated=with_animated, output_webp=output_webp, convert_main=convert_main, convert_color=convert_color)
+        return 0 if success else 1
+    elif image_path:
+        log_info(f"开始处理单张图片: {image_path}", "Main")
+        scraper = AlibabaScraper("")
+        success = scraper.process_images(image_path)
+        return 0 if success else 1
+    else:
+        if not os.path.exists(html_file):
+            log_error(f"HTML文件不存在: {html_file}", "Main")
+            return 1
+        
+        scraper = AlibabaScraper(html_file, output_path, keep_avif, webp_support, data_only, resources_only)
+        success = scraper.run(create_rebuild_script)
+        
+        return 0 if success else 1
+
+if __name__ == '__main__':
+    sys.exit(main())

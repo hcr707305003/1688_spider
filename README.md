@@ -1,0 +1,398 @@
+# 1688详情页资源采集工具
+
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Python](https://img.shields.io/badge/python-3.11+-green)
+![License](https://img.shields.io/badge/license-MIT-orange)
+![Platform](https://img.shields.io/badge/portable-Windows%20x64-lightgrey)
+
+## 项目简介
+
+这是一个用于采集1688详情页资源的工具，通过解析本地已渲染的页面来避开阿里的反爬虫机制，实现对商品图片、视频和属性的批量下载和管理。
+
+## 版本信息 
+
+- 当前版本：0.1.0（新仓库首发）
+- 当前维护：hcr707305003
+- 原项目作者：急云
+- 项目地址：https://github.com/hcr707305003/1688_spider
+- 发布日期：2026-09-08
+- [查看完整更新日志](CHANGELOG.md)
+
+## 核心功能
+
+- **资源采集**：提取商品头图、详情图、视频和属性信息
+- **批量下载**：使用aria2c高效批量下载资源
+- **自动分类**：按类型（主图、详情图、视频）自动分类保存文件
+- **快捷操作**：支持将HTML文件拖放到批处理文件上启动处理
+- **URL快捷方式**：自动生成包含原始商品链接的快捷方式
+- **重建功能**：提供重建脚本，可重新下载和处理资源
+- **图片处理**：支持详情图拼接和切割，自动处理宽高比
+- **资源打包**：支持将资源打包为压缩文件，HTML文件放在根目录，其他文件放在子目录
+- **数据挖掘**：自动提取商品标题、店铺信息、发货地、销量等数据
+- **价格管理**：支持SKU价格提取、成本计算、阶梯价格生成
+- **数据库管理**：使用DuckDB存储商品数据，支持搜索和筛选
+- **图片编辑器**：可视化编辑商品图片，支持拖拽排序、拼接、涂抹、污点去除
+
+## 快速开始（推荐）
+
+从 [Releases](https://github.com/hcr707305003/1688_spider/releases) 下载 `1688_spider-v0.1.0-windows-x64.zip`，完整解压后双击 `1688商品采集工具.exe`。便携版已经包含 Python 运行时、浏览器、匹配驱动和 aria2，不需要运行安装程序。
+
+粘贴 1688 商品详情链接并点击“开始采集”。商品 HTML、图片、视频和 `product.json` 会保存到 `data/products/`。
+
+## 系统要求
+
+### Windows 免安装版
+
+- Windows 10/11 64 位。
+- 可用磁盘空间至少 1 GB。
+- 无需预装 Python、Chrome、ChromeDriver 或 aria2。
+
+### 源码运行
+
+- **操作系统**：Windows 10/11；Linux 和 macOS 尚未完成端到端验证。
+- **Python版本**：Python 3.11+
+- **浏览器要求**：
+  - **Chrome浏览器**（推荐）：在线采集功能推荐使用 Chrome
+  - **Edge浏览器**（已适配）：已完成适配，可作为备选
+- **外部工具**：
+  - [aria2c](https://github.com/aria2/aria2/releases)（必要，用于批量下载）
+  - [ffmpeg](https://ffmpeg.org/download.html)（可选，用于视频生成）
+- **浏览器扩展**（可选）：
+  - [SingleFile](https://github.com/gildas-lormeau/SingleFile/releases)（用于保存完整HTML页面，在线采集功能无需此扩展）
+
+### Python依赖库
+
+**核心依赖（必要）**：
+```bash
+pip install requests beautifulsoup4 Pillow duckdb customtkinter pandas selenium webdriver-manager psutil
+```
+
+**可选依赖（增强功能）**：
+```bash
+# GUI增强 - Markdown渲染
+pip install tkinterweb markdown
+
+# 图片编辑器增强 - 污点去除工具
+pip install opencv-python
+
+# 视频生成功能
+pip install moviepy
+```
+
+## 源码安装步骤
+
+1. **安装Python**：从[Python官网](https://www.python.org/)下载并安装Python 3.11+
+2. **安装依赖库**：打开命令提示符，运行以下命令：
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **下载aria2c**：从[aria2c官网](https://github.com/aria2/aria2/releases)下载最新版本，解压后将`aria2c.exe`文件复制到项目根目录
+4. **安装Chrome浏览器**：源码在线采集功能推荐使用 Chrome
+5. **下载项目**：将本项目下载到本地任意目录
+
+## 使用方法
+
+### 基本使用
+
+1. **保存商品页面**：
+   - 使用安装了SingleFile扩展的浏览器打开1688商品详情页（如：`https://detail.1688.com/offer/{商品ID}.html`）
+   - 点击浏览器上的SingleFile按钮，保存完整HTML页面
+   - 在SingleFile扩展配置中重点关注 
+      - ![#c5f015](https://placehold.co/15x15/c5f015/c5f015.png) **配置-> HTML内容->保存嵌入资源的原始网址** 的复选框勾选
+      - ![#c5f015](https://placehold.co/15x15/c5f015/c5f015.png) **配置->文件名->模板 填入{url-last-segment}.{filename-extension}**
+   - 其他配置选项能不保存就不保存用不上
+
+2. **启动处理**：
+   - 将保存的HTML文件拖放到`start1688.bat`批处理文件上
+   - 程序会自动创建以商品ID命名的目录，并开始处理
+
+3. **查看结果**：
+   - 处理完成后，在商品ID目录中会生成以下内容：
+     - 存放主图
+     - 存放色卡图
+     - 存放详情图
+     - 存放视频
+     - `attributes/`：存放商品属性HTML文件
+     - `#URL.url`：商品原始链接的快捷方式
+     - `rebuild.bat`：重建脚本，可重新下载和处理资源
+
+### 商品链接自动采集（Windows）
+
+1. 双击 `start_collector_gui.bat` 打开“商品链接自动采集工具”。
+2. 粘贴 1688 商品详情链接；工具会自动识别平台并清理链接中的广告参数。
+3. 点击“开始采集”，在打开的 Chrome 中按需处理登录或验证码，然后等待界面显示完成。
+4. 点击“打开结果目录”查看图片、视频、属性页和 `product.json`。
+
+当前链接采集器实现了 1688。GUI 通过平台注册中心选择适配器，后续接入其他平台时不需要修改界面。
+
+### 免安装便携版
+
+Windows 64 位发布文件名为 `1688_spider-v0.1.0-windows-x64.zip`。解压后的结构如下：
+
+```text
+1688商品采集工具便携版/
+├── 1688商品采集工具.exe     图形界面入口
+├── _collector_worker.exe    后台采集与解析进程
+├── browser/                 固定同版本的浏览器和驱动
+├── runtime/                 Python运行时和第三方依赖
+├── tools/aria2c.exe         资源下载工具
+├── data/
+│   ├── browser_data/        登录状态和Cookie
+│   └── products/            HTML、图片、视频和product.json
+├── build-info.json          构建及浏览器版本信息
+└── 使用说明.txt
+```
+
+登录状态保存在便携目录的 `data/browser_data/`，商品结果保存在 `data/products/`。请勿把包含个人登录状态的 `data/browser_data/` 发送给他人。
+
+### 重新打包
+
+PyInstaller 不能跨系统生成原生程序，因此 Windows 包需要在 Windows 64 位环境中构建。首次构建会从 Chrome for Testing 官方清单下载约 200 MB 的浏览器，并从 aria2 官方发布页下载 Windows 64 位版本；之后复用 `.build-cache/`。
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+powershell -ExecutionPolicy Bypass -File .\build_portable.ps1
+```
+
+构建脚本会执行以下操作：
+
+1. 查询 Chrome for Testing 官方稳定版清单。
+2. 下载严格同版本的 win64 浏览器与 ChromeDriver，并校验版本。
+3. 下载并缓存官方 Windows 64 位 aria2。
+4. 使用 `portable_collector.spec` 构建无控制台 GUI 和后台工作进程。
+5. 组装浏览器、驱动和 aria2，创建空的 `data/`，不携带开发机 Cookie 或采集结果。
+6. 生成 `dist/1688商品采集工具便携版/` 和版本化 ZIP。
+
+生成结果：
+
+```powershell
+dist\1688商品采集工具便携版\
+dist\1688_spider-v0.1.0-windows-x64.zip
+```
+
+不要只分发主 EXE；`browser/`、`runtime/`、`tools/` 必须与 EXE 保持原目录结构。
+
+### 其他操作系统支持
+
+| 系统 | 源码运行 | 免安装包 | 当前状态 |
+| --- | --- | --- | --- |
+| Windows 10/11 x64 | 支持 | 支持 | 已完成真实商品采集测试 |
+| Linux x64 | 理论可移植 | 暂未提供 | 浏览器发现、aria2路径和打开目录行为需要适配及实机验证 |
+| macOS Intel/Apple Silicon | 理论可移植 | 暂未提供 | 需要分别构建、签名，并适配浏览器应用路径 |
+
+后续可以支持 Linux 和 macOS，但必须在对应系统上分别构建和测试，Windows EXE 无法直接在这些系统运行。平台适配器、解析器和 JSON 导出层本身不依赖 Windows，主要改造点集中在浏览器二进制选择、驱动下载、aria2 可执行文件路径和打开结果目录。
+
+### 批量处理
+
+- 对于多个商品页面，可逐个将HTML文件拖放到`start1688.bat`上进行处理。
+- 或者直接启用 `BP1688html.bat` 批量将当前目录全部html提交给`start1688.bat`队列处理
+- 支持 GUI 模式，运行 `python main.py --gui` 可打开图形化界面，在窗体中添加文件或目录添加到队列，点击执行处理资源采集。注部分功能受限比如资源重建。
+
+### 重建资源
+
+如果需要重新下载和处理资源，可：
+1. 进入商品ID目录
+2. 双击运行`rebuild.bat`脚本
+3. 程序会删除现有文件并重新下载和处理
+
+### 图片处理
+
+如果需要拼接和切割详情图，可：
+1. 进入商品ID目录
+2. 运行`rebuild.bat`脚本并选择选项2 "详情图拼接"
+3. 程序会自动处理图片，包括：
+   - 收集目录中所有 `C_` 开头的图片文件
+   - 按自然排序（如 C_1, C_2, C_11）排列图片
+   - 移除宽度低于 750px 的图片
+   - 判定数量最多的宽度作为主队列，移除其他宽度的图片
+   - 按照主队列首张图片的宽度拼接图片
+   - 按照宽高比小于 1:2 的比例切割图片
+   - 如果最后一张切割图小于 200px，则平均分配切割高度
+4. 处理完成后，会在当前目录生成：
+   - `拼接结果.jpg`：所有图片拼接后的完整图片
+   - `new_C_1.jpg`, `new_C_2.jpg` 等：切割后的图片（前缀可在 config.py 中配置）
+
+### 资源打包
+
+如果需要将资源打包为压缩文件，可：
+1. 进入商品ID目录
+2. 运行`rebuild.bat`脚本并选择选项4 "封包该资源"
+3. 程序会自动打包资源，生成的压缩文件结构如下：
+   - 根目录：包含 `{商品ID}.html` 文件
+   - `{商品ID}/` 子目录：包含所有下载的资源文件（图片、视频、属性等）
+
+## 项目结构
+
+```
+1688/
+├── main.py             # 主脚本（支持命令行和GUI模式）
+├── config.py           # 配置文件
+├── start1688.bat       # 启动批处理文件
+├── start-gui.bat       # GUI模式启动文件
+├── bp1688html.bat      # 批处理HTML文件
+├── gui/                # GUI模块
+│   ├── __init__.py     # GUI包初始化
+│   ├── app.py          # GUI应用主程序
+│   ├── commands.py     # 上下文菜单命令
+│   ├── logging.py      # 日志处理
+│   ├── menu.py         # 菜单管理
+│   ├── queue.py        # 队列管理
+│   ├── utils.py        # GUI工具函数
+│   ├── dnd.py          # 拖放功能
+│   ├── pricing_gui.py  # 价格计算工具
+│   ├── tiered_price_generator.py # 阶梯价格生成器
+│   └── image_editor/   # 图片编辑器模块
+│       ├── __init__.py
+│       ├── editor_window.py  # 编辑器主窗口
+│       ├── editor_canvas.py  # 画布组件
+│       ├── image_block.py    # 图片块数据模型
+│       ├── tools.py          # 工具类
+│       └── history.py        # 历史记录管理
+├── utils/              # 工具模块
+│   ├── parser.py       # HTML解析兼容层
+│   ├── database.py     # DuckDB数据库模块
+│   ├── shared_cache.py # 共享内存缓存
+│   ├── downloader.py   # 下载管理工具
+│   ├── file_handler.py # 文件处理工具
+│   ├── tool_downloader.py # aria2c下载工具
+│   ├── image_utils.py  # 图像处理基础工具
+│   ├── image_processor.py # 图像处理流程
+│   ├── price_extractor.py # 价格提取器
+│   ├── resource_downloader.py # 资源下载器
+│   ├── video_generator.py   # 视频生成器
+│   ├── launcher.py     # 启动器
+│   ├── logger.py       # 日志模块
+│   ├── updater.py      # 版本检测升级模块
+│   └── parsers/        # 平台解析器
+│       ├── __init__.py
+│       ├── base_parser.py   # 解析器基类
+│       ├── alibaba_parser.py # 1688解析器
+│       └── jd_parser.py     # 京东解析器
+├── docs/               # 文档目录
+│   └── image_editor_plan.md # 图片编辑器规划文档
+├── version.json        # 版本配置文件
+├── ROADMAP.md          # 项目路线图
+├── LICENSE             # 许可证文件
+└── README.md           # 说明文档
+```
+
+### 模块说明
+
+- **main.py**：主脚本，整合所有功能，处理完整流程，支持命令行模式和GUI模式（通过 `--gui` 参数启用）
+- **config.py**：配置文件，包含下载参数、文件命名规则、图片处理配置、GUI配置和价格计算配置等
+- **gui/app.py**：GUI应用主程序，创建主窗口和各个组件
+- **gui/url_collector_app.py**：商品链接自动采集窗口，显示平台识别、进度、日志和结果摘要
+- **collector/**：平台适配器、可取消采集服务、子进程执行器和统一 JSON 导出
+- **gui/commands.py**：上下文菜单命令，执行图像优化、资源打包、重新采集等操作
+- **gui/logging.py**：日志处理，显示处理进度和结果
+- **gui/menu.py**：菜单管理，创建和管理上下文菜单
+- **gui/queue.py**：队列管理，管理待处理文件列表
+- **gui/utils.py**：GUI工具函数，提供辅助功能
+- **gui/pricing_gui.py**：价格计算工具，基于成本数据自动计算商品价格
+- **gui/tiered_price_generator.py**：阶梯价格生成器，支持统一倍率和统一利润率定价策略
+- **utils/parser.py**：HTML解析工具，提取页面中的资源链接和属性
+- **utils/downloader.py**：下载管理工具，生成下载列表，调用aria2c下载
+- **utils/file_handler.py**：文件处理工具，创建目录，保存属性，生成快捷方式和批处理脚本
+- **utils/tool_downloader.py**：aria2c下载工具，检查和下载aria2c工具
+- **utils/image_utils.py**：图像处理基础工具，提供图片放大、切割、动图转换、文件收集、并行处理等功能
+- **utils/image_processor.py**：图像处理流程模块，实现主图、详情图、色卡图、混合图片的完整处理流程
+- **utils/database.py**：数据库模块，使用SQLite存储商品数据、价格信息
+- **utils/price_extractor.py**：价格提取器，从HTML中提取SKU价格信息
+- **utils/version.py**：版本信息模块，管理当前版本号和版本信息
+- **utils/updater.py**：版本检测升级模块，支持自动检测更新、GitHub/Gitee双源切换、下载更新包
+- **utils/video_generator.py**：视频生成器，将详情图生成为瀑布流滚动视频
+- **gui/image_editor/**：图片编辑器模块，提供可视化图片编辑功能
+  - **editor_window.py**：编辑器主窗口，包含详情图、主图、色卡、视频四个选项卡
+  - **editor_canvas.py**：画布组件，支持块模式和列模式编辑
+  - **image_block.py**：图片块数据模型，支持单图块和组合块
+  - **tools.py**：工具类，包含比例转换、智能布局拼接等功能
+  - **history.py**：历史记录管理，支持撤销/重做操作
+- **docs/**：文档目录，包含项目规划文档
+
+## 性能说明
+
+- **处理速度**：单个商品页面处理约需 10-30 秒（取决于资源数量和网络状况）
+- **在线采集**：使用浏览器在线采集约需 60 秒（包含页面加载和资源下载）
+- **资源占用**：内存占用约 50-100MB，CPU占用取决于并行线程数
+- **网络要求**：需要稳定的网络连接下载资源
+- **磁盘空间**：每个商品约占用 10-50MB（取决于图片和视频数量）
+- **并行处理**：默认使用2线程并行处理图片，可在 config.py 中调整
+
+## 安全性与隐私
+
+- ✅ 本工具在本地运行，不上传任何数据到服务器
+- ✅ 所有数据保存在本地，用户完全掌控
+- ✅ 不包含任何追踪或统计代码
+- ✅ 不收集用户个人信息
+- ⚠️ 请勿用于商业用途，遵守相关法律法规
+- ⚠️ 下载和使用他人商品图片时，请确保获得授权
+
+## 常见问题
+
+### 1. 为什么需要使用SingleFile保存页面？
+
+- 1688页面采用动态加载技术，直接使用Python请求获取的HTML不包含完整的资源信息
+- SingleFile扩展会保存页面的完整渲染结果，包括所有图片、视频和属性信息
+- 解析本地已渲染的页面可以避开阿里的反爬虫机制
+
+### 2. 为什么下载的文件大小为0？
+
+- 可能是因为网络连接问题或资源链接失效
+- 程序会自动删除小于5KB的文件，以过滤掉无效资源
+
+### 3. 为什么某些图片没有被下载？
+
+- 可能是因为图片链接格式不被支持
+- 程序会过滤掉占位图（如`lazyload.png`）
+- 请确保使用SingleFile保存的页面包含完整的资源信息
+
+### 4. 如何处理批量商品？
+
+- 可以逐个将HTML文件拖放到`start1688.bat`上进行处理
+- 每个商品会创建独立的目录，不会互相干扰
+
+### 5. 压缩包中的文件结构是怎样的？
+
+- 压缩包根目录：包含 `{商品ID}.html` 文件
+- `{商品ID}/` 子目录：包含所有下载的资源文件（图片、视频、属性等）
+
+## 后续优化方向
+
+1. **数据看板**：Streamlit/Flask+Vue 数据可视化看板
+2. **支持更多电商平台**：扩展支持淘宝、京东等电商平台HTML解析
+3. **图片水印处理**：支持批量添加/去除水印
+4. **导出报表功能**：支持Excel格式导出商品数据报表
+5. **商品数据对比**：对比不同版本商品信息，追踪价格变化
+6. **数据备份恢复**：本地数据库备份与恢复功能
+
+详见 [ROADMAP.md](ROADMAP.md)
+
+## 注意事项
+
+- 本工具仅用于个人学习和研究目的，请勿用于商业用途
+- 请遵守相关法律法规，尊重他人知识产权
+- 下载和使用他人商品图片时，请确保获得授权
+- 本工具可能会随着1688页面结构的变化而需要更新
+
+## 致谢
+
+本项目的开发离不开以下开源项目：
+
+- [BeautifulSoup4](https://www.crummy.com/software/BeautifulSoup/) - HTML解析
+- [aria2](https://github.com/aria2/aria2) - 高速下载工具
+- [SingleFile](https://github.com/gildas-lormeau/SingleFile) - 页面保存扩展
+- [Pillow](https://python-pillow.org/) - 图像处理库
+- [DuckDB](https://duckdb.org/) - 嵌入式分析数据库
+- [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) - 现代GUI组件
+- [pandas](https://pandas.pydata.org/) - 数据处理库
+- [requests](https://docs.python-requests.org/) - HTTP请求库
+
+## 许可证
+
+本项目采用MIT许可证，详见LICENSE文件。
+
+## 联系方式
+
+如有问题或建议，欢迎联系项目维护者。

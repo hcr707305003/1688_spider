@@ -1,0 +1,507 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+共享内存缓存模块
+用于跨进程共享数据，避免硬盘I/O
+包含基础设施和临时存储高级接口
+"""
+
+import json
+import struct
+import sys
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+
+try:
+    from multiprocessing import shared_memory
+    HAS_SHARED_MEMORY = True
+except ImportError:
+    HAS_SHARED_MEMORY = False
+    print("警告: shared_memory 需要 Python 3.8+")
+
+if sys.platform == 'win32':
+    SHM_NAME = 'Local\\1688_cache'
+else:
+    SHM_NAME = '1688_cache'
+SHM_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+class SharedCache:
+    """命名共享内存缓存"""
+    
+    def __init__(self, name: str = SHM_NAME, size: int = SHM_SIZE):
+        self.name = name
+        self.size = size
+        self.shm = None
+        self._is_creator = False
+    
+    def create(self) -> bool:
+        """创建共享内存（主进程调用）"""
+        if not HAS_SHARED_MEMORY:
+            return False
+        
+        try:
+            self.shm = shared_memory.SharedMemory(
+                name=self.name,
+                create=True,
+                size=self.size
+            )
+            self._is_creator = True
+            self._clear()
+            return True
+        except FileExistsError:
+            return self.connect()
+        except Exception as e:
+            print(f"创建共享内存失败: {e}")
+            return False
+    
+    def connect(self) -> bool:
+        """连接共享内存（子进程调用）"""
+        if not HAS_SHARED_MEMORY:
+            return False
+        
+        try:
+            self.shm = shared_memory.SharedMemory(name=self.name)
+            return True
+        except Exception:
+            return False
+    
+    def _clear(self):
+        """清空共享内存"""
+        if self.shm:
+            self.shm.buf[:] = b'\x00' * self.size
+    
+    def _write_block(self, offset: int, key: str, data: bytes) -> int:
+        """写入数据块"""
+        key_bytes = key.encode('utf-8')
+        key_len = len(key_bytes)
+        data_len = len(data)
+        
+        header = struct.pack('>II', key_len, data_len)
+        self.shm.buf[offset:offset+8] = header
+        self.shm.buf[offset+8:offset+8+key_len] = key_bytes
+        self.shm.buf[offset+8+key_len:offset+8+key_len+data_len] = data
+        
+        return offset + 8 + key_len + data_len
+    
+    def _read_block(self, offset: int) -> tuple:
+        """读取数据块"""
+        header = bytes(self.shm.buf[offset:offset+8])
+        if header == b'\x00' * 8:
+            return None, None, offset
+        
+        key_len, data_len = struct.unpack('>II', header)
+        key = bytes(self.shm.buf[offset+8:offset+8+key_len]).decode('utf-8')
+        data = bytes(self.shm.buf[offset+8+key_len:offset+8+key_len+data_len])
+        
+        return key, data, offset + 8 + key_len + data_len
+    
+    def write(self, key: str, data: Any) -> bool:
+        """写入数据"""
+        if not self.shm:
+            return False
+        
+        try:
+            json_bytes = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            
+            offset = 0
+            while offset < self.size - 8:
+                header = bytes(self.shm.buf[offset:offset+8])
+                if header == b'\x00' * 8:
+                    break
+                
+                existing_key, _, next_offset = self._read_block(offset)
+                if existing_key == key:
+                    self._remove_block(offset)
+                    break
+                offset = next_offset
+            
+            if offset + 8 + len(key) + len(json_bytes) > self.size:
+                return False
+            
+            self._write_block(offset, key, json_bytes)
+            return True
+        except Exception:
+            return False
+    
+    def _remove_block(self, offset: int):
+        """移除数据块（标记为删除）"""
+        header = bytes(self.shm.buf[offset:offset+8])
+        if header == b'\x00' * 8:
+            return
+        
+        key_len, data_len = struct.unpack('>II', header)
+        block_size = 8 + key_len + data_len
+        self.shm.buf[offset:offset+block_size] = b'\x00' * block_size
+    
+    def read(self, key: str) -> Optional[Any]:
+        """读取数据"""
+        if not self.shm:
+            return None
+        
+        try:
+            offset = 0
+            while offset < self.size - 8:
+                existing_key, data, next_offset = self._read_block(offset)
+                if existing_key is None:
+                    break
+                if existing_key == key:
+                    return json.loads(data.decode('utf-8'))
+                offset = next_offset
+            return None
+        except Exception:
+            return None
+    
+    def read_all(self) -> Dict[str, Any]:
+        """读取所有数据"""
+        if not self.shm:
+            return {}
+        
+        result = {}
+        try:
+            offset = 0
+            while offset < self.size - 8:
+                key, data, next_offset = self._read_block(offset)
+                if key is None:
+                    break
+                if data:
+                    result[key] = json.loads(data.decode('utf-8'))
+                offset = next_offset
+        except Exception:
+            pass
+        
+        return result
+    
+    def delete(self, key: str) -> bool:
+        """删除数据"""
+        if not self.shm:
+            return False
+        
+        try:
+            offset = 0
+            while offset < self.size - 8:
+                header = bytes(self.shm.buf[offset:offset+8])
+                if header == b'\x00' * 8:
+                    break
+                
+                existing_key, _, next_offset = self._read_block(offset)
+                if existing_key == key:
+                    self._remove_block(offset)
+                    return True
+                offset = next_offset
+            return False
+        except Exception:
+            return False
+    
+    def clear(self):
+        """清空所有数据"""
+        if self.shm:
+            self._clear()
+    
+    def close(self):
+        """关闭共享内存"""
+        if self.shm:
+            self.shm.close()
+            self.shm = None
+    
+    def unlink(self):
+        """删除共享内存"""
+        if self.shm:
+            self.shm.close()
+            if self._is_creator:
+                try:
+                    self.shm.unlink()
+                except:
+                    pass
+            self.shm = None
+
+
+_cache: Optional[SharedCache] = None
+
+
+def get_shared_cache() -> Optional[SharedCache]:
+    """获取共享内存缓存实例"""
+    global _cache
+    if _cache is not None and _cache.shm is not None:
+        return _cache
+    
+    if _cache is None and HAS_SHARED_MEMORY:
+        _cache = SharedCache()
+        if not _cache.connect():
+            _cache = None
+    elif _cache is not None and _cache.shm is None:
+        if not _cache.connect():
+            _cache = None
+    return _cache
+
+
+def init_shared_cache() -> bool:
+    """初始化共享内存（主进程调用）"""
+    global _cache
+    if not HAS_SHARED_MEMORY:
+        return False
+    
+    _cache = SharedCache()
+    return _cache.create()
+
+
+def connect_shared_cache() -> bool:
+    """连接共享内存（子进程调用）"""
+    global _cache
+    if not HAS_SHARED_MEMORY:
+        return False
+    
+    cache = SharedCache()
+    if cache.connect():
+        _cache = cache
+        return True
+    return False
+
+
+def close_shared_cache():
+    """关闭共享内存"""
+    global _cache
+    if _cache:
+        _cache.close()
+        _cache = None
+
+
+def destroy_shared_cache():
+    """销毁共享内存"""
+    global _cache
+    if _cache:
+        _cache.unlink()
+        _cache = None
+
+
+def _get_cache():
+    """获取缓存实例，如果不存在则尝试连接"""
+    if not HAS_SHARED_MEMORY:
+        return None
+    
+    cache = get_shared_cache()
+    if cache and cache.shm:
+        return cache
+    
+    if connect_shared_cache():
+        cache = get_shared_cache()
+        if cache and cache.shm:
+            return cache
+    
+    return None
+
+
+def save_resources_temp(product_id: str, main_images: List, color_images: List, 
+                        detail_images: List, videos: List) -> bool:
+    """临时保存资源链接"""
+    try:
+        data = {
+            'product_id': product_id,
+            'main_images': main_images,
+            'color_images': color_images,
+            'detail_images': detail_images,
+            'videos': videos,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        cache = _get_cache()
+        if cache:
+            key = f'resources_{product_id}'
+            return cache.write(key, data)
+        
+        return True
+    except Exception:
+        return False
+
+
+def save_prices_temp(product_id: str, prices: Dict) -> bool:
+    """临时保存价格信息"""
+    try:
+        data = {
+            'product_id': product_id,
+            'prices': prices,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        cache = _get_cache()
+        if cache:
+            key = f'prices_{product_id}'
+            return cache.write(key, data)
+        
+        return True
+    except Exception:
+        return False
+
+
+def save_resource_counts_temp(product_id: str, main_images: int, color_images: int,
+                               detail_images: int, videos: int, output_path: str = None,
+                               platform: str = 'alibaba') -> bool:
+    """临时保存资源计数"""
+    try:
+        data = {
+            'product_id': product_id,
+            'resource_counts': [main_images, color_images, detail_images, videos],
+            'output_path': output_path,
+            'platform': platform,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        cache = _get_cache()
+        if cache:
+            key = f'counts_{product_id}'
+            return cache.write(key, data)
+        
+        return True
+    except Exception:
+        return False
+
+
+def save_product_info_temp(product_id: str, info: Dict) -> bool:
+    """临时保存商品详细信息"""
+    try:
+        data = {
+            'product_id': product_id,
+            'info': info,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        cache = _get_cache()
+        if cache:
+            key = f'info_{product_id}'
+            return cache.write(key, data)
+        
+        return True
+    except Exception:
+        return False
+
+
+def save_shop_info_temp(shop_info: Dict) -> bool:
+    """临时保存店铺信息"""
+    try:
+        if not shop_info or not shop_info.get('shop_id'):
+            return False
+        
+        data = {
+            'shop_info': shop_info,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        cache = _get_cache()
+        if cache:
+            key = f'shop_{shop_info["shop_id"]}'
+            return cache.write(key, data)
+        
+        return True
+    except Exception:
+        return False
+
+
+def get_pending_resources() -> List[Dict]:
+    """获取待导入的资源数据"""
+    cache = _get_cache()
+    if not cache:
+        return []
+    
+    result = []
+    all_data = cache.read_all()
+    for key, data in all_data.items():
+        if key.startswith('resources_'):
+            result.append(data)
+    
+    return result
+
+
+def get_pending_prices() -> List[Dict]:
+    """获取待导入的价格数据"""
+    cache = _get_cache()
+    if not cache:
+        return []
+    
+    result = []
+    all_data = cache.read_all()
+    for key, data in all_data.items():
+        if key.startswith('prices_'):
+            result.append(data)
+    
+    return result
+
+
+def get_pending_counts() -> List[Dict]:
+    """获取待导入的资源计数数据"""
+    cache = _get_cache()
+    if not cache:
+        return []
+    
+    result = []
+    all_data = cache.read_all()
+    for key, data in all_data.items():
+        if key.startswith('counts_'):
+            result.append(data)
+    
+    return result
+
+
+def get_pending_product_info() -> List[Dict]:
+    """获取待导入的商品详细信息"""
+    cache = _get_cache()
+    if not cache:
+        return []
+    
+    result = []
+    all_data = cache.read_all()
+    for key, data in all_data.items():
+        if key.startswith('info_'):
+            result.append(data)
+    
+    return result
+
+
+def get_pending_shop_info() -> List[Dict]:
+    """获取待导入的店铺信息"""
+    cache = _get_cache()
+    if not cache:
+        return []
+    
+    result = []
+    all_data = cache.read_all()
+    for key, data in all_data.items():
+        if key.startswith('shop_'):
+            result.append(data)
+    
+    return result
+
+
+def clear_pending_data():
+    """清空共享内存缓存"""
+    cache = _get_cache()
+    if cache:
+        cache.clear()
+
+
+def has_pending_data() -> bool:
+    """检查是否有待导入的数据"""
+    cache = _get_cache()
+    if not cache:
+        return False
+    
+    all_data = cache.read_all()
+    for key in all_data.keys():
+        if key.startswith(('resources_', 'prices_', 'counts_', 'info_', 'shop_')):
+            return True
+    return False
+
+
+def get_cache_stats() -> Dict:
+    """获取缓存统计"""
+    cache = _get_cache()
+    if not cache:
+        return {'resources': 0, 'prices': 0, 'counts': 0, 'info': 0, 'shop': 0}
+    
+    all_data = cache.read_all()
+    return {
+        'resources': sum(1 for k in all_data if k.startswith('resources_')),
+        'prices': sum(1 for k in all_data if k.startswith('prices_')),
+        'counts': sum(1 for k in all_data if k.startswith('counts_')),
+        'info': sum(1 for k in all_data if k.startswith('info_')),
+        'shop': sum(1 for k in all_data if k.startswith('shop_'))
+    }
