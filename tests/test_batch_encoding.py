@@ -33,6 +33,12 @@ class BatchEncodingTests(unittest.TestCase):
             }).create_rebuild_script(temp_dir)
             assert_utf8_crlf_batch(self, Path(temp_dir) / 'rebuild.bat')
 
+    def test_windows_powershell_build_script_has_utf8_bom(self):
+        root = Path(__file__).resolve().parents[1]
+        raw = (root / 'build_portable.ps1').read_bytes()
+        self.assertTrue(raw.startswith(b'\xef\xbb\xbf'))
+        self.assertNotIn('\ufffd', raw.decode('utf-8-sig'))
+
 
 if __name__ == '__main__':
     unittest.main()

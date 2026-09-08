@@ -1,6 +1,6 @@
 import unittest
 
-from gui.url_collector_app import build_summary
+from gui.url_collector_app import build_summary, classify_log_level
 
 
 class GuiPresenterTests(unittest.TestCase):
@@ -32,6 +32,13 @@ class GuiPresenterTests(unittest.TestCase):
         self.assertEqual(summary['price'], '未获取')
         self.assertEqual(summary['sku_count'], '0')
         self.assertEqual(summary['image_count'], '0')
+
+    def test_classifies_log_levels_for_colored_output(self):
+        self.assertEqual(classify_log_level('[SUCCESS] 页面采集完成'), 'success')
+        self.assertEqual(classify_log_level('正在下载详情图片 14 / 20'), 'active')
+        self.assertEqual(classify_log_level('[WARNING] 使用备用解析方式'), 'warning')
+        self.assertEqual(classify_log_level('错误：页面解析失败'), 'error')
+        self.assertEqual(classify_log_level('输出目录：C:/products/1'), 'default')
 
 
 if __name__ == '__main__':

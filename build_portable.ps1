@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Python = ".\.venv\Scripts\python.exe",
     [ValidateSet("Stable", "Beta", "Dev", "Canary")]
     [string]$Channel = "Stable"

@@ -4,10 +4,14 @@ from pathlib import Path
 
 
 project_root = Path(SPECPATH)
+app_icon = project_root / 'assets' / 'app-icon.ico'
 common = dict(
     pathex=[str(project_root)],
     binaries=[],
-    datas=[(str(project_root / 'version.json'), '.')],
+    datas=[
+        (str(project_root / 'version.json'), '.'),
+        (str(project_root / 'assets' / 'app-icon.ico'), 'assets'),
+    ],
     hiddenimports=[
         'selenium.webdriver.chrome.webdriver',
         'selenium.webdriver.chrome.options',
@@ -44,6 +48,7 @@ gui_exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     contents_directory='runtime',
+    icon=str(app_icon),
 )
 
 worker_exe = EXE(

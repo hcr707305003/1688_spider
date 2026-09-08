@@ -12,6 +12,12 @@ class PortablePackageDefinitionTests(unittest.TestCase):
         self.assertIn("name='_collector_worker'", spec)
         self.assertIn("contents_directory='runtime'", spec)
         self.assertIn('selenium.webdriver.chrome.webdriver', spec)
+        self.assertIn("'assets' / 'app-icon.ico'", spec)
+        self.assertIn('icon=str(app_icon)', spec)
+
+        icon = PROJECT_ROOT / 'assets' / 'app-icon.ico'
+        self.assertTrue(icon.is_file())
+        self.assertEqual(icon.read_bytes()[:4], b'\x00\x00\x01\x00')
 
     def test_build_script_bundles_browser_driver_and_empty_data_dirs(self):
         script = (PROJECT_ROOT / 'build_portable.ps1').read_text(encoding='utf-8-sig')
